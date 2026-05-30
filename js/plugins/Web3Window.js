@@ -4,8 +4,79 @@
  */
 
 (function() {
+    // ----------------------------------------
+    // Claim SWORD contract ABI
+    const SWORD_CLAIM_ADDRESS = "0xf309a7083C97BCfd6DE6c5bb8cCAAD55e8A9Bb3e";
+    const SWORD_CLAIM_ABI = [
+        {
+            "inputs": [{"internalType": "address", "name": "", "type": "address"}],
+            "name": "hasSword",
+            "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "claimSword",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        }
+    ];
 
-    let walletAddress = null;
+    //-------------------------------
+    // SWORD CLAIM
+    //---------------------------------
+    async function checkHasSword() {
+        const wallet = $gameVariables.value(1);
+
+        const provider = new ethers.BrowserProvider(window.ethereum);
+
+        const contract = new ethers.Contract(
+            SWORD_CLAIM_ADDRESS,
+            SWORD_CLAIM_ABI,
+            provider
+        );
+
+        const hasSword = await contract.hasSword(wallet);
+
+        $gameSwitches.setValue(10, hasSword);
+
+        console.log("Wallet:", wallet);
+        console.log("Has sword:", hasSword);
+
+        alert("Has sword: " + hasSword);
+    }
+
+    async function claimSword() {
+
+        const provider =
+            new ethers.BrowserProvider(window.ethereum);
+
+        const signer =
+            await provider.getSigner();
+
+        const contract =
+            new ethers.Contract(
+                SWORD_CLAIM_ADDRESS,
+                SWORD_CLAIM_ABI,
+                signer
+            );
+
+        const tx = await contract.claimSword();
+
+        console.log("TX:", tx.hash);
+
+        await tx.wait();
+
+        console.log("Sword claimed!");
+
+        await checkHasSword();
+    }
+
+
+    //--------------------------------------------
+    // Wallet connect and wallet window
 
     function Window_Web3Wallet() {
         this.initialize.apply(this, arguments);
@@ -74,16 +145,8 @@
         console.log(chainId);
 
         const wallet = $gameVariables.value(1);
-
-        const balanceHex = await window.ethereum.request({
-            method: "eth_getBalance",
-            params: [wallet, "latest"]
-        });
-
         const provider = new ethers.BrowserProvider(window.ethereum);
-
         const balance = await provider.getBalance(wallet);
-
         const eth = ethers.formatEther(balance);
 
         console.log(eth);
@@ -111,18 +174,21 @@
 
     window.Web3Game = {
         connectWallet: connectWallet,
-
+        checkHasSword: checkHasSword,
+        claimSword: claimSword,
         getWallet() {
             return $gameVariables.value(1);
         },
-
         getChainId() {
             return $gameVariables.value(2);
         },
-
         getEthBalance() {
             return $gameVariables.value(3);
-        }
+        },
+        hasSword() {
+            return $gameSwitches.value(10);
+        } 
+
     };
 
 })();
