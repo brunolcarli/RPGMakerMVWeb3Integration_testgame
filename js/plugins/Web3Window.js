@@ -5,23 +5,14 @@
 
 (function() {
 
-    const SWORD_CLAIM_ADDRESS = "0xf309a7083C97BCfd6DE6c5bb8cCAAD55e8A9Bb3e";
+    const SWORD_CLAIM_ADDRESS = "0x5b5357a3db207e0a5f72c3d3c5d2eed40f42779c";
 
     const SWORD_CLAIM_ABI = [
-        {
-            "inputs": [{"internalType": "address", "name": "", "type": "address"}],
-            "name": "hasSword",
-            "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "claimSword",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        }
+        "function claimSword()",
+        "function upgradeSword()",
+        "function hasSword(address player) view returns (bool)",
+        "function getPlayerSwordId(address player) view returns (uint256)",
+        "function getWeaponStats(uint256 tokenId) view returns (uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)"
     ];
 
     const VAR_WALLET = 1;
@@ -76,14 +67,56 @@
         const contract = await getSwordContractWithProvider();
         const hasSword = await contract.hasSword(wallet);
 
-        $gameSwitches.setValue(SWITCH_HAS_SWORD, hasSword);
+        $gameSwitches.setValue(10, hasSword);
 
-        if (hasSword && !$gameParty.hasItem($dataWeapons[WEAPON_BLOCKCHAIN_SWORD])) {
-            $gameParty.gainItem($dataWeapons[WEAPON_BLOCKCHAIN_SWORD], 1);
+        if (hasSword) {
+
+            const tokenId =
+                await contract.getPlayerSwordId(wallet);
+
+            const stats =
+                await contract.getWeaponStats(tokenId);
+
+            console.log("Token ID:", tokenId);
+            console.log("Stats:", stats);
+
+            // RPG Maker MV params:
+            // [MHP, MMP, ATK, DEF, MAT, MDF, AGI, LUK]
+
+            $dataWeapons[1].params[0] = Number(stats[7]); // Max HP
+            $dataWeapons[1].params[1] = Number(stats[8]); // Max MP
+            $dataWeapons[1].params[2] = Number(stats[1]); // ATK
+            $dataWeapons[1].params[3] = Number(stats[2]); // DEF
+            $dataWeapons[1].params[4] = Number(stats[3]); // MAT
+            $dataWeapons[1].params[5] = Number(stats[4]); // MDF
+            $dataWeapons[1].params[6] = Number(stats[5]); // AGI
+            $dataWeapons[1].params[7] = Number(stats[6]); // LUK
+
+            if (!$gameParty.hasItem($dataWeapons[1])) {
+                $gameParty.gainItem($dataWeapons[1], 1);
+            }
+
+            $dataWeapons[1].params[2] = Number(stats[1]); // ATK
+            $gameParty.members().forEach(actor => actor.refresh());
         }
 
         console.log("Wallet:", wallet);
         console.log("Has sword:", hasSword);
+
+        if (hasSword) {
+            const sword = $dataWeapons[WEAPON_BLOCKCHAIN_SWORD];
+
+            if (!$gameParty.hasItem(sword)) {
+                $gameParty.gainItem(sword, 1);
+            }
+
+            const actor = $gameParty.leader();
+
+            if (actor && actor.canEquip(sword)) {
+                actor.changeEquip(0, sword); // 0 = slot de arma
+                actor.refresh();
+            }
+        }
 
         return hasSword;
     }
@@ -119,6 +152,33 @@
         }
 
         $gameMessage.add("You obtained the Blockchain Sword!");
+    }
+
+    async function upgradeSword() {
+
+        const provider =
+            new ethers.BrowserProvider(window.ethereum);
+
+        const signer =
+            await provider.getSigner();
+
+        const contract =
+            new ethers.Contract(
+                SWORD_CLAIM_ADDRESS,
+                SWORD_CLAIM_ABI,
+                signer
+            );
+
+        const tx = await contract.upgradeSword();
+
+        console.log("TX:", tx.hash);
+
+        await tx.wait();
+
+        console.log("Sword upgraded!");
+
+        await checkHasSword();
+        $gameMessage.add("Your Blockchain Sword has been upgraded!");
     }
 
     async function connectWallet(scene) {
@@ -250,18 +310,37 @@
         }
     };
 
-    const _Scene_Map_update = Scene_Map.prototype.update;
+    // const _Scene_Map_update = Scene_Map.prototype.update;
 
-    Scene_Map.prototype.update = function() {
-        _Scene_Map_update.call(this);
+    // Scene_Map.prototype.update = function() {
+    //     _Scene_Map_update.call(this);
 
-        if (Input.isTriggered("pageup")) {
-            connectWallet(this);
-        }
-    };
+    //     if (Input.isTriggered("pageup")) {
+    //         connectWallet(this);
+    //     }
+    // };
 
     // ----------------------------------------
     // Scene Menu
+
+    const _Window_MenuCommand_addOriginalCommands = Window_MenuCommand.prototype.addOriginalCommands;
+
+    Window_MenuCommand.prototype.addOriginalCommands = function() {
+        _Window_MenuCommand_addOriginalCommands.call(this);
+        this.addCommand("Connect Wallet", "connectWallet", true);
+    };
+
+    const _Scene_Menu_createCommandWindow = Scene_Menu.prototype.createCommandWindow;
+
+    Scene_Menu.prototype.createCommandWindow = function() {
+        _Scene_Menu_createCommandWindow.call(this);
+        this._commandWindow.setHandler("connectWallet", this.commandConnectWallet.bind(this));
+    };
+
+    Scene_Menu.prototype.commandConnectWallet = function() {
+        this._commandWindow.activate();
+        Web3Game.connectWallet(this);
+    };
 
     const _Scene_Menu_create = Scene_Menu.prototype.create;
 
@@ -280,12 +359,26 @@
     };
 
     // ----------------------------------------
+    // Auto connect wallet on New Game
+
+    const _Scene_Title_commandNewGame = Scene_Title.prototype.commandNewGame;
+
+    Scene_Title.prototype.commandNewGame = async function() {
+        _Scene_Title_commandNewGame.call(this);
+
+        setTimeout(async function() {
+            await Web3Game.connectWallet(SceneManager._scene);
+        }, 500);
+    };
+
+    // ----------------------------------------
     // Public API
 
     window.Web3Game = {
         connectWallet,
         checkHasSword,
         claimSword,
+        upgradeSword: upgradeSword,
 
         getWallet() {
             return $gameVariables.value(VAR_WALLET);
