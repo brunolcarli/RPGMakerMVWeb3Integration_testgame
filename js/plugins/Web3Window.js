@@ -32,7 +32,7 @@
         }
     };
 
-    const API_URL = "https://dragonsdenapi.beelzeware.dev/graphql/";
+    const GRAPHQL_ENDPOINT = "https://dragonsdenapi.beelzeware.dev/graphql/";
 
     const VAR_WALLET = 1;
     const VAR_CHAIN_ID = 2;
@@ -100,6 +100,43 @@
             CONTRACTS.dragonSlayer.abi,
             await getSigner()
         );
+    }
+
+    async function switchToSepolia() {
+        try {
+            await window.ethereum.request({
+                method: "wallet_switchEthereumChain",
+                params: [{ chainId: "0xaa36a7" }]
+            });
+
+            return true;
+
+        } catch (switchError) {
+            console.error("Switch network error:", switchError);
+
+            try {
+                await window.ethereum.request({
+                    method: "wallet_addEthereumChain",
+                    params: [{
+                        chainId: "0xaa36a7",
+                        chainName: "Sepolia",
+                        nativeCurrency: {
+                            name: "Sepolia ETH",
+                            symbol: "ETH",
+                            decimals: 18
+                        },
+                        rpcUrls: ["https://rpc.sepolia.org"],
+                        blockExplorerUrls: ["https://sepolia.etherscan.io"]
+                    }]
+                });
+
+                return true;
+
+            } catch (addError) {
+                console.error("Add Sepolia error:", addError);
+                return false;
+            }
+        }
     }
 
     // ============================================================
@@ -312,7 +349,23 @@
             $gameVariables.setValue(VAR_CHAIN_ID, chainId);
 
             if (chainId !== SEPOLIA_CHAIN_ID) {
-                alert("Please switch your wallet to Sepolia.");
+                const switched = await switchToSepolia();
+
+                if (!switched) {
+                    alert("Please switch your wallet to Sepolia.");
+                    return;
+                }
+
+                const newChainId = await window.ethereum.request({
+                    method: "eth_chainId"
+                });
+
+                $gameVariables.setValue(VAR_CHAIN_ID, newChainId);
+
+                if (newChainId !== SEPOLIA_CHAIN_ID) {
+                    alert("Wrong network. Please switch to Sepolia.");
+                    return;
+                }
             }
 
             const provider = getProvider();
