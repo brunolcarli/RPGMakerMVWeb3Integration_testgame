@@ -1,28 +1,55 @@
 /*:
- * @plugindesc Web3 Wallet Connection for RPG Maker MV
+ * @plugindesc Web3 Wallet + NFT + Backend Integration for RPG Maker MV
  * @author Bruno + ChatGPT
  */
 
 (function() {
+    "use strict";
 
-    const SWORD_CLAIM_ADDRESS = "0x5b5357a3db207e0a5f72c3d3c5d2eed40f42779c";
+    // ============================================================
+    // CONFIG
+    // ============================================================
 
-    const SWORD_CLAIM_ABI = [
-        "function claimSword()",
-        "function upgradeSword()",
-        "function hasSword(address player) view returns (bool)",
-        "function getPlayerSwordId(address player) view returns (uint256)",
-        "function getWeaponStats(uint256 tokenId) view returns (uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)"
-    ];
+    const CONTRACTS = {
+        sword: {
+            address: "0x5b5357a3db207e0a5f72c3d3c5d2eed40f42779c",
+            abi: [
+                "function claimSword()",
+                "function upgradeSword()",
+                "function hasSword(address player) view returns (bool)",
+                "function getPlayerSwordId(address player) view returns (uint256)",
+                "function getWeaponStats(uint256 tokenId) view returns (uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)"
+            ]
+        },
+
+        dragonSlayer: {
+            address: "0x76f005636ec1019b02f5ddb42569b343fb7857d6",
+            abi: [
+                "function claimDragonSlayer()",
+                "function hasDragonSlayer(address player) view returns (bool)",
+                "function getPlayerBadgeId(address player) view returns (uint256)"
+            ]
+        }
+    };
+
+    const GRAPHQL_ENDPOINT = "http://localhost:6776/graphql/";
 
     const VAR_WALLET = 1;
     const VAR_CHAIN_ID = 2;
     const VAR_ETH_BALANCE = 3;
+
     const SWITCH_HAS_SWORD = 10;
+    const SWITCH_HAS_DRAGON_SLAYER = 11;
+
     const WEAPON_BLOCKCHAIN_SWORD = 1;
+
     const SEPOLIA_CHAIN_ID = "0xaa36a7";
 
     let mapWindowHidden = false;
+
+    // ============================================================
+    // HELPERS
+    // ============================================================
 
     function shortWallet(address) {
         if (!address) return "Not connected";
@@ -35,26 +62,49 @@
         return "Wrong Network";
     }
 
-    async function getSwordContractWithProvider() {
-        const provider = new ethers.BrowserProvider(window.ethereum);
+    function getProvider() {
+        return new ethers.BrowserProvider(window.ethereum);
+    }
 
+    async function getSigner() {
+        return await getProvider().getSigner();
+    }
+
+    async function getSwordContractWithProvider() {
         return new ethers.Contract(
-            SWORD_CLAIM_ADDRESS,
-            SWORD_CLAIM_ABI,
-            provider
+            CONTRACTS.sword.address,
+            CONTRACTS.sword.abi,
+            getProvider()
         );
     }
 
     async function getSwordContractWithSigner() {
-        const provider = new ethers.BrowserProvider(window.ethereum);
-        const signer = await provider.getSigner();
-
         return new ethers.Contract(
-            SWORD_CLAIM_ADDRESS,
-            SWORD_CLAIM_ABI,
-            signer
+            CONTRACTS.sword.address,
+            CONTRACTS.sword.abi,
+            await getSigner()
         );
     }
+
+    async function getDragonSlayerContractWithProvider() {
+        return new ethers.Contract(
+            CONTRACTS.dragonSlayer.address,
+            CONTRACTS.dragonSlayer.abi,
+            getProvider()
+        );
+    }
+
+    async function getDragonSlayerContractWithSigner() {
+        return new ethers.Contract(
+            CONTRACTS.dragonSlayer.address,
+            CONTRACTS.dragonSlayer.abi,
+            await getSigner()
+        );
+    }
+
+    // ============================================================
+    // SWORD NFT
+    // ============================================================
 
     async function checkHasSword() {
         const wallet = $gameVariables.value(VAR_WALLET);
@@ -67,44 +117,27 @@
         const contract = await getSwordContractWithProvider();
         const hasSword = await contract.hasSword(wallet);
 
-        $gameSwitches.setValue(10, hasSword);
+        $gameSwitches.setValue(SWITCH_HAS_SWORD, hasSword);
 
         if (hasSword) {
+            const tokenId = await contract.getPlayerSwordId(wallet);
+            const stats = await contract.getWeaponStats(tokenId);
 
-            const tokenId =
-                await contract.getPlayerSwordId(wallet);
+            console.log("Sword Token ID:", tokenId);
+            console.log("Sword Stats:", stats);
 
-            const stats =
-                await contract.getWeaponStats(tokenId);
-
-            console.log("Token ID:", tokenId);
-            console.log("Stats:", stats);
+            const sword = $dataWeapons[WEAPON_BLOCKCHAIN_SWORD];
 
             // RPG Maker MV params:
             // [MHP, MMP, ATK, DEF, MAT, MDF, AGI, LUK]
-
-            $dataWeapons[1].params[0] = Number(stats[7]); // Max HP
-            $dataWeapons[1].params[1] = Number(stats[8]); // Max MP
-            $dataWeapons[1].params[2] = Number(stats[1]); // ATK
-            $dataWeapons[1].params[3] = Number(stats[2]); // DEF
-            $dataWeapons[1].params[4] = Number(stats[3]); // MAT
-            $dataWeapons[1].params[5] = Number(stats[4]); // MDF
-            $dataWeapons[1].params[6] = Number(stats[5]); // AGI
-            $dataWeapons[1].params[7] = Number(stats[6]); // LUK
-
-            if (!$gameParty.hasItem($dataWeapons[1])) {
-                $gameParty.gainItem($dataWeapons[1], 1);
-            }
-
-            $dataWeapons[1].params[2] = Number(stats[1]); // ATK
-            $gameParty.members().forEach(actor => actor.refresh());
-        }
-
-        console.log("Wallet:", wallet);
-        console.log("Has sword:", hasSword);
-
-        if (hasSword) {
-            const sword = $dataWeapons[WEAPON_BLOCKCHAIN_SWORD];
+            sword.params[0] = Number(stats[7]); // Max HP
+            sword.params[1] = Number(stats[8]); // Max MP
+            sword.params[2] = Number(stats[1]); // ATK
+            sword.params[3] = Number(stats[2]); // DEF
+            sword.params[4] = Number(stats[3]); // MAT
+            sword.params[5] = Number(stats[4]); // MDF
+            sword.params[6] = Number(stats[5]); // AGI
+            sword.params[7] = Number(stats[6]); // LUK
 
             if (!$gameParty.hasItem(sword)) {
                 $gameParty.gainItem(sword, 1);
@@ -113,10 +146,15 @@
             const actor = $gameParty.leader();
 
             if (actor && actor.canEquip(sword)) {
-                actor.changeEquip(0, sword); // 0 = slot de arma
+                actor.changeEquip(0, sword);
                 actor.refresh();
             }
+
+            $gameParty.members().forEach(actor => actor.refresh());
         }
+
+        console.log("Wallet:", wallet);
+        console.log("Has Sword:", hasSword);
 
         return hasSword;
     }
@@ -137,9 +175,18 @@
         }
 
         const contract = await getSwordContractWithSigner();
+
+        const alreadyHasSword = await contract.hasSword(wallet);
+
+        if (alreadyHasSword) {
+            await checkHasSword();
+            $gameMessage.add("You already have the Blockchain Sword.");
+            return;
+        }
+
         const tx = await contract.claimSword();
 
-        console.log("TX:", tx.hash);
+        console.log("Sword TX:", tx.hash);
 
         await tx.wait();
 
@@ -147,39 +194,101 @@
 
         await checkHasSword();
 
-        if (!$gameParty.hasItem($dataWeapons[WEAPON_BLOCKCHAIN_SWORD])) {
-            $gameParty.gainItem($dataWeapons[WEAPON_BLOCKCHAIN_SWORD], 1);
-        }
-
         $gameMessage.add("You obtained the Blockchain Sword!");
     }
 
     async function upgradeSword() {
+        const wallet = $gameVariables.value(VAR_WALLET);
 
-        const provider =
-            new ethers.BrowserProvider(window.ethereum);
+        if (!wallet) {
+            alert("Connect your wallet first.");
+            return;
+        }
 
-        const signer =
-            await provider.getSigner();
+        const chainId = $gameVariables.value(VAR_CHAIN_ID);
 
-        const contract =
-            new ethers.Contract(
-                SWORD_CLAIM_ADDRESS,
-                SWORD_CLAIM_ABI,
-                signer
-            );
+        if (chainId !== SEPOLIA_CHAIN_ID) {
+            alert("Please switch your wallet to Sepolia.");
+            return;
+        }
+
+        const contract = await getSwordContractWithSigner();
 
         const tx = await contract.upgradeSword();
 
-        console.log("TX:", tx.hash);
+        console.log("Upgrade TX:", tx.hash);
 
         await tx.wait();
 
         console.log("Sword upgraded!");
 
         await checkHasSword();
+
         $gameMessage.add("Your Blockchain Sword has been upgraded!");
     }
+
+    // ============================================================
+    // DRAGON SLAYER NFT
+    // ============================================================
+
+    async function checkHasDragonSlayer() {
+        const wallet = $gameVariables.value(VAR_WALLET);
+
+        if (!wallet) {
+            return false;
+        }
+
+        const contract = await getDragonSlayerContractWithProvider();
+        const hasBadge = await contract.hasDragonSlayer(wallet);
+
+        $gameSwitches.setValue(SWITCH_HAS_DRAGON_SLAYER, hasBadge);
+
+        console.log("Has Dragon Slayer:", hasBadge);
+
+        return hasBadge;
+    }
+
+    async function claimDragonSlayer() {
+        const wallet = $gameVariables.value(VAR_WALLET);
+
+        if (!wallet) {
+            alert("Connect your wallet first.");
+            return;
+        }
+
+        const chainId = $gameVariables.value(VAR_CHAIN_ID);
+
+        if (chainId !== SEPOLIA_CHAIN_ID) {
+            alert("Please switch your wallet to Sepolia.");
+            return;
+        }
+
+        const contract = await getDragonSlayerContractWithSigner();
+
+        const alreadyHasBadge = await contract.hasDragonSlayer(wallet);
+
+        if (alreadyHasBadge) {
+            await checkHasDragonSlayer();
+            $gameMessage.add("You already have the Dragon Slayer NFT.");
+            return;
+        }
+
+        const tx = await contract.claimDragonSlayer();
+
+        console.log("Dragon Slayer TX:", tx.hash);
+
+        await tx.wait();
+
+        console.log("Dragon Slayer claimed!");
+
+        await checkHasDragonSlayer();
+
+        $gameMessage.add("Dragon Slayer NFT unlocked!");
+    }
+
+    // ============================================================
+    // WALLET CONNECTION
+    // ============================================================
 
     async function connectWallet(scene) {
         if (!window.ethereum) {
@@ -206,7 +315,7 @@
                 alert("Please switch your wallet to Sepolia.");
             }
 
-            const provider = new ethers.BrowserProvider(window.ethereum);
+            const provider = getProvider();
             const balance = await provider.getBalance(wallet);
             const eth = ethers.formatEther(balance);
 
@@ -217,6 +326,8 @@
             console.log("Balance:", eth);
 
             await checkHasSword();
+            await checkHasDragonSlayer();
+            await loadOrCreatePlayerProgress();
 
             mapWindowHidden = true;
 
@@ -230,8 +341,179 @@
         }
     }
 
-    // ----------------------------------------
-    // Map wallet window
+    // ============================================================
+    // BACKEND / GRAPHQL
+    // ============================================================
+
+    async function loadOrCreatePlayerProgress() {
+        const progress = await loadPlayerProgress();
+
+        if (!progress) {
+            console.log("No progress found. Creating initial save...");
+            await savePlayerProgress();
+            return;
+        }
+
+        applyPlayerProgress(progress);
+    }
+
+    async function loadPlayerProgress() {
+        const wallet = $gameVariables.value(VAR_WALLET);
+
+        if (!wallet) {
+            return null;
+        }
+
+        const response = await fetch(GRAPHQL_ENDPOINT, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                query: `
+                    query PlayerProgress($wallet: String!) {
+                        playerProgress(wallet: $wallet) {
+                            wallet
+                            actorId
+                            name
+                            level
+                            exp
+                            hp
+                            mp
+                            mhp
+                            mmp
+                            atk
+                            defense
+                            mat
+                            mdf
+                            agi
+                            luk
+                            gold
+                            mapId
+                            x
+                            y
+                        }
+                    }
+                `,
+                variables: {
+                    wallet
+                }
+            })
+        });
+
+        const json = await response.json();
+
+        if (json.errors || !json.data || !json.data.playerProgress) {
+            console.warn("Progress not found:", json.errors);
+            return null;
+        }
+
+        return json.data.playerProgress;
+    }
+
+    function applyPlayerProgress(progress) {
+        const actor = $gameActors.actor(progress.actorId || 1);
+
+        actor.changeLevel(progress.level, false);
+
+        const currentExp = actor.currentExp();
+        const diffExp = progress.exp - currentExp;
+
+        if (diffExp > 0) {
+            actor.gainExp(diffExp);
+        }
+
+        actor.setHp(progress.hp);
+        actor.setMp(progress.mp);
+
+        const currentGold = $gameParty.gold();
+        const diffGold = progress.gold - currentGold;
+
+        if (diffGold > 0) {
+            $gameParty.gainGold(diffGold);
+        } else if (diffGold < 0) {
+            $gameParty.loseGold(Math.abs(diffGold));
+        }
+
+        $gamePlayer.reserveTransfer(
+            progress.mapId,
+            progress.x,
+            progress.y,
+            2,
+            0
+        );
+
+        actor.refresh();
+
+        console.log("Progress loaded:", progress);
+    }
+
+    async function savePlayerProgress() {
+        const wallet = $gameVariables.value(VAR_WALLET);
+
+        if (!wallet) {
+            console.warn("Cannot save progress: no wallet connected.");
+            return;
+        }
+
+        const actor = $gameActors.actor(1);
+
+        const payload = {
+            query: `
+                mutation SavePlayerProgress($input: SavePlayerProgressInput!) {
+                    savePlayerProgress(input: $input) {
+                        ok
+                        playerProgress {
+                            wallet
+                        }
+                    }
+                }
+            `,
+            variables: {
+                input: {
+                    wallet: wallet,
+                    actorId: actor.actorId(),
+                    name: actor.name(),
+                    level: actor.level,
+                    exp: actor.currentExp(),
+                    hp: actor.hp,
+                    mp: actor.mp,
+                    mhp: actor.mhp,
+                    mmp: actor.mmp,
+                    atk: actor.atk,
+                    defense: actor.def,
+                    mat: actor.mat,
+                    mdf: actor.mdf,
+                    agi: actor.agi,
+                    luk: actor.luk,
+                    gold: $gameParty.gold(),
+                    mapId: $gameMap.mapId(),
+                    x: $gamePlayer.x,
+                    y: $gamePlayer.y
+                }
+            }
+        };
+
+        console.log("Saving progress:", payload.variables.input);
+
+        const response = await fetch(GRAPHQL_ENDPOINT, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const json = await response.json();
+
+        console.log("Save response:", json);
+
+        return json;
+    }
+
+    // ============================================================
+    // MAP WALLET WINDOW
+    // ============================================================
 
     function Window_Web3Wallet() {
         this.initialize.apply(this, arguments);
@@ -255,12 +537,13 @@
         if (wallet) {
             this.drawText(shortWallet(wallet), 0, 36, this.contentsWidth(), "center");
         } else {
-            this.drawText("Pressione Q para conectar", 0, 36, this.contentsWidth(), "center");
+            this.drawText("Use New Game or Menu", 0, 36, this.contentsWidth(), "center");
         }
     };
 
-    // ----------------------------------------
-    // Menu Web3 window
+    // ============================================================
+    // MENU WEB3 WINDOW
+    // ============================================================
 
     function Window_Web3Menu() {
         this.initialize.apply(this, arguments);
@@ -289,13 +572,18 @@
             if (balance) {
                 text += " | " + parseFloat(balance).toFixed(4) + " ETH";
             }
+
+            if ($gameSwitches.value(SWITCH_HAS_DRAGON_SLAYER)) {
+                text += " | Dragon Slayer";
+            }
         }
 
         this.drawText(text, 0, 0, this.contentsWidth(), "left");
     };
 
-    // ----------------------------------------
-    // Scene Map
+    // ============================================================
+    // SCENE MAP
+    // ============================================================
 
     const _Scene_Map_createAllWindows = Scene_Map.prototype.createAllWindows;
 
@@ -310,36 +598,44 @@
         }
     };
 
-    // const _Scene_Map_update = Scene_Map.prototype.update;
+    // ============================================================
+    // SCENE MENU
+    // ============================================================
 
-    // Scene_Map.prototype.update = function() {
-    //     _Scene_Map_update.call(this);
-
-    //     if (Input.isTriggered("pageup")) {
-    //         connectWallet(this);
-    //     }
-    // };
-
-    // ----------------------------------------
-    // Scene Menu
-
-    const _Window_MenuCommand_addOriginalCommands = Window_MenuCommand.prototype.addOriginalCommands;
+    const _Window_MenuCommand_addOriginalCommands =
+        Window_MenuCommand.prototype.addOriginalCommands;
 
     Window_MenuCommand.prototype.addOriginalCommands = function() {
         _Window_MenuCommand_addOriginalCommands.call(this);
         this.addCommand("Connect Wallet", "connectWallet", true);
+        this.addCommand("Save Progress", "saveProgress", true);
     };
 
-    const _Scene_Menu_createCommandWindow = Scene_Menu.prototype.createCommandWindow;
+    const _Scene_Menu_createCommandWindow =
+        Scene_Menu.prototype.createCommandWindow;
 
     Scene_Menu.prototype.createCommandWindow = function() {
         _Scene_Menu_createCommandWindow.call(this);
-        this._commandWindow.setHandler("connectWallet", this.commandConnectWallet.bind(this));
+
+        this._commandWindow.setHandler(
+            "connectWallet",
+            this.commandConnectWallet.bind(this)
+        );
+
+        this._commandWindow.setHandler(
+            "saveProgress",
+            this.commandSaveProgress.bind(this)
+        );
     };
 
     Scene_Menu.prototype.commandConnectWallet = function() {
         this._commandWindow.activate();
         Web3Game.connectWallet(this);
+    };
+
+    Scene_Menu.prototype.commandSaveProgress = function() {
+        this._commandWindow.activate();
+        Web3Game.savePlayerProgress();
     };
 
     const _Scene_Menu_create = Scene_Menu.prototype.create;
@@ -358,27 +654,38 @@
         this.addWindow(this._web3MenuWindow);
     };
 
-    // ----------------------------------------
-    // Auto connect wallet on New Game
+    // ============================================================
+    // AUTO CONNECT ON NEW GAME
+    // ============================================================
 
-    const _Scene_Title_commandNewGame = Scene_Title.prototype.commandNewGame;
+    const _Scene_Title_commandNewGame =
+        Scene_Title.prototype.commandNewGame;
 
-    Scene_Title.prototype.commandNewGame = async function() {
+    Scene_Title.prototype.commandNewGame = function() {
         _Scene_Title_commandNewGame.call(this);
 
-        setTimeout(async function() {
-            await Web3Game.connectWallet(SceneManager._scene);
-        }, 500);
+        setTimeout(function() {
+            Web3Game.connectWallet(SceneManager._scene);
+        }, 700);
     };
 
-    // ----------------------------------------
-    // Public API
+    // ============================================================
+    // PUBLIC API
+    // ============================================================
 
     window.Web3Game = {
         connectWallet,
+
         checkHasSword,
         claimSword,
-        upgradeSword: upgradeSword,
+        upgradeSword,
+
+        checkHasDragonSlayer,
+        claimDragonSlayer,
+
+        loadOrCreatePlayerProgress,
+        loadPlayerProgress,
+        savePlayerProgress,
 
         getWallet() {
             return $gameVariables.value(VAR_WALLET);
@@ -394,6 +701,10 @@
 
         hasSword() {
             return $gameSwitches.value(SWITCH_HAS_SWORD);
+        },
+
+        hasDragonSlayer() {
+            return $gameSwitches.value(SWITCH_HAS_DRAGON_SLAYER);
         }
     };
 
